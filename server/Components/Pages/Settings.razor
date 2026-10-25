@@ -1,0 +1,94 @@
+@page "/settings"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDb> F
+@inject FileStore Files
+@inject PushService Push
+@inject AuthenticationStateProvider Auth
+<PageTitle>Settings</PageTitle>
+<h3>Institute & ID Card Layout</h3>
+@if (st != null)
+{
+    <div class="row g-3">
+        <div class="col-lg-7"><div class="card"><div class="card-header">Card ke upar ki details</div><div class="card-body">
+            <EditForm Model="st" OnValidSubmit="Save" class="row g-2">
+                <div class="col-12"><label class="form-label small">Institute name</label><InputText class="form-control" @bind-Value="st.Name" /></div>
+                <div class="col-12"><label class="form-label small">Tagline (optional)</label><InputText class="form-control" @bind-Value="st.Tagline" /></div>
+                <div class="col-md-6"><label class="form-label small">Phones</label><InputText class="form-control" @bind-Value="st.Phones" /></div>
+                <div class="col-md-6"><label class="form-label small">Website</label><InputText class="form-control" @bind-Value="st.Website" /></div>
+                <div class="col-md-6"><label class="form-label small">Card colour (upar)</label><InputText type="color" class="form-control form-control-color" @bind-Value="st.CardColor1" /></div>
+                <div class="col-md-6"><label class="form-label small">Card colour (neeche)</label><InputText type="color" class="form-control form-control-color" @bind-Value="st.CardColor2" /></div>
+                <div class="col-12"><label class="form-label small">Fees card ke neeche note</label><InputText class="form-control" @bind-Value="st.FeeCardNote" /></div>
+                <div class="col-md-6"><label class="form-label small">Agla Roll No.</label><InputNumber class="form-control" @bind-Value="st.NextRollNo" /></div>
+                <div class="col-12"><button class="btn btn-primary">Save</button> <span class="text-success">@msg</span>
+                    @if (firstId > 0) { <a class="btn btn-outline-dark ms-2" href="idcard/student/@firstId" target="_blank">Card preview</a> }</div>
+            </EditForm></div></div>
+
+            <div class="card mt-3"><div class="card-header">Push notification (FCM) status</div><div class="card-body">
+                @if (ps == null) { <span class="text-muted">Check ho raha hai...</span> }
+                else
+                {
+                    <div>FCM server key: @if (ps.Configured) { <span class="badge bg-success">Configured</span> <span class="small text-muted">project: @ps.ProjectId</span> } else { <span class="badge bg-danger">Band</span> <div class="text-danger small mt-1">@ps.Error</div> }</div>
+                    <div class="mt-1">Registered phones: Admin <b>@ps.AdminDevices</b> • Students <b>@ps.StudentDevices</b></div>
+                    <div class="small text-muted">Phone ka count 0 ho to us phone par app me logout karke dobara login karein.</div>
+                }
+                <button class="btn btn-outline-primary btn-sm mt-2" @onclick="TestPush" disabled="@testing">Admin devices par test push bhejein</button>
+                @foreach (var l in testRes) { <div class="small mt-1">@l</div> }
+            </div></div>
+        </div>
+        <div class="col-lg-5">
+            <div class="card mb-3"><div class="card-header">Logo / Stamp / Sign (PNG transparent best)</div><div class="card-body">
+                @foreach (var (key, label, path) in Imgs())
+                {
+                    <div class="mb-2"><label class="form-label small">@label</label>
+                        <div class="d-flex gap-2 align-items-center">@if (path != null) { <img src="@path" style="height:40px;max-width:80px;object-fit:contain;background:#eee" /> }
+                            <InputFile class="form-control form-control-sm" accept="image/*" OnChange="e => Upload(key, e.File)" /></div></div>
+                }
+            </div></div>
+            <div class="card"><div class="card-header">Admin password badlein</div><div class="card-body">
+                <input class="form-control mb-2" type="password" placeholder="Purana password" @bind="oldPw" />
+                <input class="form-control mb-2" type="password" placeholder="Naya password (min 6)" @bind="newPw" />
+                <button class="btn btn-warning" @onclick="ChangePw">Change</button> <span class="@(pwOk ? "text-success" : "text-danger")">@pwMsg</span></div></div>
+        </div>
+    </div>
+}
+@code {
+    InstituteSettings? st; PushStatus? ps; List<string> testRes = new(); bool testing;
+    string? msg, pwMsg, oldPw, newPw; bool pwOk; int firstId;
+    (string, string, string?)[] Imgs() => new[] { ("logo", "Logo", st!.LogoPath), ("stamp", "Institute stamp", st.StampPath), ("sign", "Auth. signature", st.SignPath) };
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await F.CreateDbContextAsync();
+        st = await db.Settings.FirstAsync();
+        firstId = await db.Students.OrderBy(s => s.Id).Select(s => s.Id).FirstOrDefaultAsync();
+        ps = await Push.StatusAsync();
+    }
+    async Task TestPush() { testing = true; testRes = new() { "Bhej raha hu..." }; testRes = await Push.TestAdminsAsync(); ps = await Push.StatusAsync(); testing = false; }
+    async Task Save()
+    {
+        await using var db = await F.CreateDbContextAsync();
+        var x = await db.Settings.FirstAsync();
+        x.Name = st!.Name; x.Tagline = st.Tagline; x.Phones = st.Phones; x.Website = st.Website; x.CardColor1 = st.CardColor1;
+        x.CardColor2 = st.CardColor2; x.FeeCardNote = st.FeeCardNote; x.NextRollNo = st.NextRollNo;
+        await db.SaveChangesAsync(); msg = "Saved ✔";
+    }
+    async Task Upload(string key, IBrowserFile file)
+    {
+        await using var s = file.OpenReadStream(3_000_000);
+        var path = await Files.SaveAsync(s, file.Name, "branding");
+        await using var db = await F.CreateDbContextAsync();
+        var x = await db.Settings.FirstAsync();
+        if (key == "logo") x.LogoPath = path; else if (key == "stamp") x.StampPath = path; else x.SignPath = path;
+        await db.SaveChangesAsync(); st = x;
+    }
+    async Task ChangePw()
+    {
+        var u = (await Auth.GetAuthenticationStateAsync()).User;
+        var id = int.Parse(u.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
+        await using var db = await F.CreateDbContextAsync();
+        var a = await db.Admins.FindAsync(id);
+        if (a == null || !Security.Verify(oldPw ?? "", a.PasswordHash)) { pwOk = false; pwMsg = "Purana password galat"; return; }
+        if ((newPw ?? "").Length < 6) { pwOk = false; pwMsg = "Naya password kam se kam 6 character"; return; }
+        a.PasswordHash = Security.Hash(newPw!); await db.SaveChangesAsync(); pwOk = true; pwMsg = "Password badal gaya"; oldPw = newPw = null;
+    }
+}

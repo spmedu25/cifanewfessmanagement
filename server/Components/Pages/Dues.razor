@@ -1,0 +1,32 @@
+@page "/dues"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject FeeService Fees
+@inject IDbContextFactory<AppDb> F
+<PageTitle>Dues</PageTitle>
+<h3>Dues / Defaulters</h3>
+<div class="row g-2 mb-3">
+    <div class="col-md-3"><select class="form-select" @bind="catId" @bind:after="CatChanged"><option value="0">All categories</option>@foreach (var c in cats) { <option value="@c.Id">@c.Name</option> }</select></div>
+    <div class="col-md-4"><select class="form-select" @bind="batchId" @bind:after="Load"><option value="0">All batches</option>@foreach (var b in batches.Where(b => catId == 0 || b.CategoryId == catId)) { <option value="@b.Id">@b.Name</option> }</select></div>
+    <div class="col-md-5 pt-2"><b>Total due: <span class="text-danger">₹@rows.Sum(r => r.Due).ToString("N0")</span></b> (@rows.Count students)</div>
+</div>
+<table class="table table-sm table-hover bg-white"><thead><tr><th>Roll</th><th>Name</th><th>Batch</th><th>Mobile</th><th>Pending months</th><th>Since</th><th class="text-end">Due</th><th></th></tr></thead>
+@foreach (var r in rows)
+{
+    <tr><td>@r.RollNo</td><td><a href="students/@r.StudentId">@r.Name</a></td><td>@r.Batch</td><td>@r.Mobile</td><td>@r.Months</td><td>@r.Oldest.ToString("dd-MM-yy")</td>
+        <td class="text-end text-danger fw-bold">₹@r.Due.ToString("N0")</td>
+        <td class="text-end"><a class="btn btn-sm btn-outline-success" target="_blank" href="https://wa.me/91@r.Mobile?text=@Uri.EscapeDataString($"Dear {r.Name}, aapki Rs.{r.Due:N0} fees pending hai. Kripya jaldi jama karein.")">WhatsApp</a>
+            <a class="btn btn-sm btn-outline-primary" href="tel:@r.Mobile">Call</a></td></tr>
+}
+</table>
+@code {
+    List<DueRow> rows = new(); List<Category> cats = new(); List<Batch> batches = new(); int catId, batchId;
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await F.CreateDbContextAsync();
+        cats = await db.Categories.OrderBy(c => c.Name).ToListAsync(); batches = await db.Batches.OrderBy(b => b.Name).ToListAsync();
+        await Load();
+    }
+    async Task CatChanged() { batchId = 0; await Load(); }
+    async Task Load() => rows = await Fees.DuesAsync(catId, batchId, DateTime.Today);
+}

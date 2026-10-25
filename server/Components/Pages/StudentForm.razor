@@ -1,0 +1,97 @@
+@page "/students/new"
+@page "/students/edit/{Id:int}"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject StudentService Students
+@inject IDbContextFactory<AppDb> F
+@inject FileStore Files
+@inject NavigationManager Nav
+<PageTitle>@(Id == null ? "New Admission" : "Edit Student")</PageTitle>
+<h3>@(Id == null ? "New Admission" : "Edit Student")</h3>
+<EditForm Model="input" OnValidSubmit="Save">
+    <DataAnnotationsValidator />
+    <div class="row g-3">
+        <div class="col-lg-8">
+            <div class="card mb-3"><div class="card-header">Course / Batch</div><div class="card-body row g-2">
+                <div class="col-md-4"><label class="form-label small">Category</label>
+                    <select class="form-select" @bind="catId" @bind:after="() => input.BatchId = 0"><option value="0">-- select --</option>@foreach (var c in cats) { <option value="@c.Id">@c.Name</option> }</select></div>
+                <div class="col-md-5"><label class="form-label small">Batch</label>
+                    <InputSelect class="form-select" @bind-Value="input.BatchId"><option value="0">-- select --</option>@foreach (var b in batches.Where(b => b.CategoryId == catId)) { <option value="@b.Id">@b.Name (@b.Course)</option> }</InputSelect></div>
+                <div class="col-md-3"><label class="form-label small">Admission date</label><InputDate class="form-control" @bind-Value="input.AdmissionDate" /></div>
+            </div></div>
+            <div class="card mb-3"><div class="card-header">Student details</div><div class="card-body row g-2">
+                <div class="col-md-6"><label class="form-label small">Name *</label><InputText class="form-control" @bind-Value="input.Name" /></div>
+                <div class="col-md-6"><label class="form-label small">Father's name *</label><InputText class="form-control" @bind-Value="input.FatherName" /></div>
+                <div class="col-md-6"><label class="form-label small">Mother's name</label><InputText class="form-control" @bind-Value="input.MotherName" /></div>
+                <div class="col-md-3"><label class="form-label small">Date of birth</label><InputDate class="form-control" @bind-Value="input.DateOfBirth" /></div>
+                <div class="col-md-3"><label class="form-label small">Gender</label><InputSelect class="form-select" @bind-Value="input.Gender"><option>Male</option><option>Female</option><option>Other</option></InputSelect></div>
+                <div class="col-md-4"><label class="form-label small">Mobile *</label><InputText class="form-control" @bind-Value="input.Mobile" maxlength="10" /></div>
+                <div class="col-md-4"><label class="form-label small">Alternate mobile</label><InputText class="form-control" @bind-Value="input.AltMobile" /></div>
+                <div class="col-md-4"><label class="form-label small">Aadhaar no.</label><InputText class="form-control" @bind-Value="input.AadhaarNo" /></div>
+                <div class="col-md-6"><label class="form-label small">Email</label><InputText class="form-control" @bind-Value="input.Email" /></div>
+                <div class="col-md-6"><label class="form-label small">Address *</label><InputText class="form-control" @bind-Value="input.Address" /></div>
+                <div class="col-md-6"><label class="form-label small">Remarks</label><InputText class="form-control" @bind-Value="input.Remarks" /></div>
+                <div class="col-md-6"><label class="form-label small">@(Id == null ? "Student app password (blank = mobile number)" : "Naya password (blank = no change)")</label><InputText class="form-control" @bind-Value="input.Password" /></div>
+            </div></div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card mb-3"><div class="card-header">Photo</div><div class="card-body">
+                @if (photoPath != null) { <img src="@photoPath" style="width:110px;height:135px;object-fit:cover" class="mb-2 rounded" /> }
+                <InputFile class="form-control" accept="image/*" OnChange="e => photo = e.File" /></div></div>
+            <div class="card mb-3"><div class="card-header">Discount & fees</div><div class="card-body">
+                @if (batch != null)
+                {
+                    <div class="small text-muted mb-2">Batch fee: admission ₹@batch.AdmissionFee.ToString("N0"), monthly ₹@batch.MonthlyFee.ToString("N0") × @batch.DurationMonths months</div>
+                    <label class="form-label small">Admission discount ₹</label><InputNumber class="form-control mb-2" @bind-Value="input.AdmissionDiscount" />
+                    <label class="form-label small">Monthly discount ₹ (har month)</label><InputNumber class="form-control mb-2" @bind-Value="input.MonthlyDiscount" />
+                    <div class="alert alert-info py-2 mb-0">
+                        Admission: ₹@Math.Max(0, batch.AdmissionFee - input.AdmissionDiscount).ToString("N0")<br />
+                        Monthly: ₹@Math.Max(0, batch.MonthlyFee - input.MonthlyDiscount).ToString("N0")<br />
+                        <b>Total payable: ₹@((Math.Max(0, batch.AdmissionFee - input.AdmissionDiscount) + batch.DurationMonths * Math.Max(0, batch.MonthlyFee - input.MonthlyDiscount)).ToString("N0"))</b>
+                    </div>
+                }
+                else { <div class="text-muted">Pehle batch select karein</div> }
+            </div></div>
+        </div>
+    </div>
+    <ValidationSummary />
+    @if (error != null) { <div class="alert alert-danger">@error</div> }
+    <button class="btn btn-success" disabled="@busy">@(Id == null ? "Admission karein" : "Save changes")</button>
+    <a class="btn btn-light" href="students">Cancel</a>
+</EditForm>
+@code {
+    [Parameter] public int? Id { get; set; }
+    StudentInput input = new(); List<Category> cats = new(); List<Batch> batches = new();
+    int catId; IBrowserFile? photo; string? photoPath, error; bool busy;
+    Batch? batch => batches.FirstOrDefault(b => b.Id == input.BatchId);
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await F.CreateDbContextAsync();
+        cats = await db.Categories.Where(c => c.IsActive).OrderBy(c => c.Name).ToListAsync();
+        batches = await db.Batches.Where(b => b.IsActive).OrderBy(b => b.Name).ToListAsync();
+        if (Id != null)
+        {
+            var s = await Students.GetAsync(Id.Value);
+            if (s != null) { input = StudentInput.From(s); catId = s.Batch.CategoryId; photoPath = s.PhotoPath;
+                if (!batches.Any(b => b.Id == s.BatchId)) batches.Add(s.Batch); }
+        }
+    }
+    async Task Save()
+    {
+        error = null; busy = true;
+        try
+        {
+            int sid;
+            if (Id == null) sid = (await Students.CreateAsync(input, true)).Id;
+            else { await Students.UpdateAsync(Id.Value, input); sid = Id.Value; }
+            if (photo != null)
+            {
+                await using var st = photo.OpenReadStream(3_000_000);
+                await Students.SetPhotoAsync(sid, await Files.SaveAsync(st, photo.Name, "photos"));
+            }
+            Nav.NavigateTo($"students/{sid}");
+        }
+        catch (Exception e) when (e is InvalidOperationException or IOException) { error = e.Message; }
+        busy = false;
+    }
+}

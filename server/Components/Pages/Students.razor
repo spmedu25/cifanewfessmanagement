@@ -1,0 +1,45 @@
+@page "/students"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject StudentService StudentSvc
+@inject IDbContextFactory<AppDb> F
+<PageTitle>Students</PageTitle>
+<div class="d-flex justify-content-between mb-2"><h3>Students</h3><a class="btn btn-primary" href="students/new"><i class="bi bi-person-plus"></i> New Admission</a></div>
+<div class="row g-2 mb-3">
+    <div class="col-md-3"><input class="form-control" placeholder="Name / Roll / Mobile" @bind="q" @bind:event="oninput" @onkeyup="OnKey" /></div>
+    <div class="col-md-2"><select class="form-select" @bind="catId" @bind:after="CatChanged"><option value="0">All categories</option>@foreach (var c in cats) { <option value="@c.Id">@c.Name</option> }</select></div>
+    <div class="col-md-3"><select class="form-select" @bind="batchId" @bind:after="Search"><option value="0">All batches</option>@foreach (var b in batches.Where(b => catId == 0 || b.CategoryId == catId)) { <option value="@b.Id">@b.Name</option> }</select></div>
+    <div class="col-md-2"><select class="form-select" @bind="status" @bind:after="Search"><option value="">All status</option><option>Active</option><option>Pending</option><option>Left</option><option>Completed</option></select></div>
+    <div class="col-md-2"><button class="btn btn-secondary w-100" @onclick="Search">Search</button></div>
+</div>
+<table class="table table-sm table-hover bg-white align-middle"><thead><tr><th></th><th>Roll</th><th>Name</th><th>Father</th><th>Mobile</th><th>Batch</th><th>Status</th><th class="text-end">Due</th><th></th></tr></thead>
+@foreach (var r in rows)
+{
+    <tr><td>@if (r.S.PhotoPath != null) { <img class="thumb" src="@r.S.PhotoPath" /> }</td><td>@r.S.RollNo</td><td><a href="students/@r.S.Id">@r.S.Name</a></td><td>@r.S.FatherName</td><td>@r.S.Mobile</td>
+        <td>@r.S.Batch.Name</td><td><span class="badge @Badge(r.S.Status)">@r.S.Status</span></td>
+        <td class="text-end @(r.Overdue > 0 ? "text-danger fw-bold" : "")">@(r.Overdue > 0 ? "₹" + r.Overdue.ToString("N0") : "-")</td>
+        <td class="text-end"><a class="btn btn-sm btn-outline-dark" href="idcard/student/@r.S.Id" target="_blank">ID Card</a></td></tr>
+}
+</table>
+<div class="d-flex justify-content-between"><span class="text-muted">Total: @total</span>
+    <div><button class="btn btn-sm btn-light" disabled="@(pageNo <= 1)" @onclick="() => Go(-1)">Prev</button> Page @pageNo <button class="btn btn-sm btn-light" disabled="@(pageNo * 25 >= total)" @onclick="() => Go(1)">Next</button></div></div>
+@code {
+    List<StudentRow> rows = new(); List<Category> cats = new(); List<Batch> batches = new();
+    string? q; int catId, batchId, pageNo = 1, total; string status = "";
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await F.CreateDbContextAsync();
+        cats = await db.Categories.OrderBy(c => c.Name).ToListAsync(); batches = await db.Batches.OrderBy(b => b.Name).ToListAsync();
+        await Search();
+    }
+    static string Badge(StudentStatus s) => s switch { StudentStatus.Active => "bg-success", StudentStatus.Pending => "bg-warning text-dark", _ => "bg-secondary" };
+    async Task OnKey(KeyboardEventArgs e) { if (e.Key == "Enter") await Search(); }
+    async Task CatChanged() { batchId = 0; await Search(); }
+    async Task Go(int d) { pageNo += d; await Load(); }
+    async Task Search() { pageNo = 1; await Load(); }
+    async Task Load()
+    {
+        StudentStatus? st = Enum.TryParse<StudentStatus>(status, out var x) ? x : null;
+        (rows, total) = await StudentSvc.SearchAsync(q, catId, batchId, st, pageNo, 25);
+    }
+}

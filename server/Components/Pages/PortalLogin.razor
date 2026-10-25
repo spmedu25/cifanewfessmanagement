@@ -1,0 +1,23 @@
+@page "/portal/login"
+@layout LoginLayout
+<PageTitle>Student Login</PageTitle>
+<div class="card shadow" style="width:380px">
+    <div class="card-body p-4">
+        <h4 class="text-center mb-1">Student Portal</h4>
+        <div class="text-center text-muted small mb-3">Apni details, fees aur ID card dekhein</div>
+        @if (Error != null)
+        {
+            <div class="alert alert-danger py-2">Roll No / Mobile ya password galat hai</div>
+        }
+
+        <!-- Yahan action ko /api/portal/login kar diya hai -->
+        <form method="post" action="/api/portal/login">
+            <input class="form-control mb-2" name="login" placeholder="Roll No ya Mobile number" autofocus />
+            <input class="form-control mb-3" type="password" name="password" placeholder="Password (pehli baar: mobile number)" />
+            <button class="btn btn-primary w-100">Login</button>
+        </form>
+    </div>
+</div>
+@code {
+    [SupplyParameterFromQuery] public string? Error { get; set; }
+}

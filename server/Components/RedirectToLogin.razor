@@ -1,0 +1,13 @@
+@inject NavigationManager Nav
+@code {
+    [CascadingParameter] Task<AuthenticationState>? Auth { get; set; }
+    protected override async Task OnInitializedAsync()
+    {
+        var user = Auth != null ? (await Auth).User : null;
+        string target;
+        if (user?.IsInRole("Student") == true) target = "/portal";          // student ne admin page kholna chaha
+        else if (user?.IsInRole("Admin") == true) target = "/";             // admin ne student portal kholna chaha
+        else target = new Uri(Nav.Uri).AbsolutePath.StartsWith("/portal", StringComparison.OrdinalIgnoreCase) ? "/portal/login" : "/login";
+        Nav.NavigateTo(target, forceLoad: true);
+    }
+}

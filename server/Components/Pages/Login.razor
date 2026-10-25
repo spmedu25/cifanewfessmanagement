@@ -1,0 +1,14 @@
+@page "/login"
+@layout LoginLayout
+<PageTitle>Admin Login</PageTitle>
+<div class="card shadow" style="width:360px"><div class="card-body p-4">
+    <h4 class="mb-3 text-center">Admin Login</h4>
+    @if (Error != null) { <div class="alert alert-danger py-2">Username ya password galat hai</div> }
+    <form method="post" action="/account/login">
+        <input class="form-control mb-2" name="username" placeholder="Username" autofocus />
+        <input class="form-control mb-3" type="password" name="password" placeholder="Password" />
+        <button class="btn btn-primary w-100">Login</button>
+    </form>
+    <div class="text-muted small mt-3">Default: admin / admin123 (login ke baad Settings me badal dein)</div>
+</div></div>
+@code { [SupplyParameterFromQuery] public string? Error { get; set; } }

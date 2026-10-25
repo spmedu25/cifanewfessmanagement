@@ -1,0 +1,39 @@
+@page "/"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject FeeService Fees
+@inject IDbContextFactory<AppDb> F
+<PageTitle>Dashboard</PageTitle>
+<h3 class="mb-3">Dashboard</h3>
+@if (s == null) { <p>Loading...</p> }
+else
+{
+    <div class="row g-3 mb-4">
+        @foreach (var (t, v, c) in Cards())
+        {
+            <div class="col-6 col-lg-3"><div class="card text-bg-@c"><div class="card-body"><div class="small">@t</div><div class="fs-3 fw-bold">@v</div></div></div></div>
+        }
+    </div>
+    <div class="d-flex gap-2 mb-3">
+        <a class="btn btn-primary" href="students/new"><i class="bi bi-person-plus"></i> New Admission</a>
+        <a class="btn btn-outline-danger" href="dues"><i class="bi bi-cash-coin"></i> Dues dekhein</a>
+    </div>
+    <div class="card"><div class="card-header">Recent payments</div>
+        <table class="table table-sm mb-0"><thead><tr><th>Receipt</th><th>Student</th><th>Mode</th><th>Date</th><th class="text-end">Amount</th></tr></thead>
+        @foreach (var p in recent) { <tr><td><a href="receipt/@p.Id" target="_blank">@p.ReceiptNo</a></td><td>@p.Student.Name (@p.Student.RollNo)</td><td>@p.Mode</td><td>@p.PaidOn.ToString("dd-MM-yy hh:mm tt")</td><td class="text-end">₹@p.Amount.ToString("N0")</td></tr> }
+        </table></div>
+}
+@code {
+    DashboardStats? s; List<Payment> recent = new();
+    (string, string, string)[] Cards() => new[] {
+        ("Active students", s!.Active.ToString(), "primary"), ("Pending approvals", s.Pending.ToString(), "warning"),
+        ("Aaj ka collection", "₹" + s.TodayCollection.ToString("N0"), "success"), ("Is mahine ka collection", "₹" + s.MonthCollection.ToString("N0"), "success"),
+        ("Total due", "₹" + s.TotalOverdue.ToString("N0"), "danger"), ("Defaulters", s.Defaulters.ToString(), "danger"),
+        ("Active batches", s.Batches.ToString(), "info"), ("", "", "light") }.Take(7).ToArray();
+    protected override async Task OnInitializedAsync()
+    {
+        s = await Fees.DashboardAsync();
+        await using var db = await F.CreateDbContextAsync();
+        recent = await db.Payments.Include(p => p.Student).Where(p => !p.IsCancelled).OrderByDescending(p => p.PaidOn).Take(10).ToListAsync();
+    }
+}

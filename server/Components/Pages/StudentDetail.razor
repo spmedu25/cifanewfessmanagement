@@ -1,0 +1,174 @@
+@page "/students/{Id:int}"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject StudentService Students
+@inject FeeService Fees
+@inject IDbContextFactory<AppDb> F
+@inject AuthenticationStateProvider Auth
+@inject IJSRuntime JS
+<PageTitle>Student</PageTitle>
+@if (s == null) { <p>Loading...</p> }
+else
+{
+    <div class="card mb-3"><div class="card-body d-flex gap-3 flex-wrap">
+        @if (s.PhotoPath != null) { <img src="@s.PhotoPath" style="width:90px;height:110px;object-fit:cover" class="rounded" /> }
+        <div class="flex-grow-1">
+            <h4 class="mb-0">@s.Name <span class="badge @(s.Status == StudentStatus.Active ? "bg-success" : s.Status == StudentStatus.Pending ? "bg-warning text-dark" : s.Status == StudentStatus.Completed ? "bg-primary" : "bg-secondary") fs-6">@s.Status</span></h4>
+            <div class="text-muted">Roll No. <b>@s.RollNo</b> • @s.Batch.Category.Name › @s.Batch.Name (@s.Batch.Course, @s.Batch.DurationMonths months)</div>
+            <div>S/o @s.FatherName • 📞 @s.Mobile • @s.Address</div>
+            <div class="small text-muted">Admission: @s.AdmissionDate.ToString("dd-MM-yyyy") • Discount: ₹@s.MonthlyDiscount.ToString("N0")/month, ₹@s.AdmissionDiscount.ToString("N0") admission</div>
+        </div>
+        <div class="d-flex flex-column gap-1">
+            <a class="btn btn-sm btn-outline-primary" href="students/edit/@s.Id">Edit</a>
+            <a class="btn btn-sm btn-outline-dark" href="idcard/student/@s.Id" target="_blank">ID Card</a>
+            <a class="btn btn-sm btn-outline-success" href="chats?student=@s.Id"><i class="bi bi-chat-dots"></i> Message</a>
+            @if (s.Status == StudentStatus.Pending) { <button class="btn btn-sm btn-success" @onclick="Approve">Approve admission</button> }
+            @if (s.Status == StudentStatus.Active) { <button class="btn btn-sm btn-outline-secondary" @onclick="() => SetStatus(StudentStatus.Left)">Mark Left</button> }
+            @if (s.Status is StudentStatus.Left or StudentStatus.Completed) { <button class="btn btn-sm btn-outline-success" @onclick="() => SetStatus(StudentStatus.Active)">Re-activate</button> }
+        </div>
+    </div></div>
+
+    @if (sum != null)
+    {
+        <div class="row g-2 mb-3">
+            <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Total payable @(sum.Waived > 0 ? $"(₹{sum.Waived:N0} maaf)" : "")</div><div class="fs-5">₹@sum.TotalNet.ToString("N0")</div></div></div></div>
+            <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Paid</div><div class="fs-5 text-success">₹@sum.Paid.ToString("N0")</div></div></div></div>
+            <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Remaining</div><div class="fs-5">₹@sum.Balance.ToString("N0")</div></div></div></div>
+            <div class="col-6 col-md-3"><div class="card border-danger"><div class="card-body py-2"><div class="small text-muted">Due abhi tak (@sum.OverdueCount months)</div><div class="fs-5 text-danger">₹@sum.OverdueNow.ToString("N0")</div></div></div></div>
+        </div>
+    }
+
+    @if (s.Status == StudentStatus.Active && sum?.Balance > 0)
+    {
+        <div class="card mb-3"><div class="card-header">Fees receive karein</div><div class="card-body">
+            <EditForm Model="pay" OnValidSubmit="Receive" class="row g-2">
+                <div class="col-md-2"><label class="form-label small">Amount ₹</label><InputNumber class="form-control" @bind-Value="pay.Amount" /></div>
+                <div class="col-md-2"><label class="form-label small">Mode</label><InputSelect class="form-select" @bind-Value="pay.Mode"><option>Cash</option><option>UPI</option><option>Card</option><option>Bank</option><option>Cheque</option></InputSelect></div>
+                <div class="col-md-3"><label class="form-label small">Reference / UTR</label><InputText class="form-control" @bind-Value="pay.Reference" /></div>
+                <div class="col-md-3"><label class="form-label small">Remarks</label><InputText class="form-control" @bind-Value="pay.Remarks" /></div>
+                <div class="col-md-2 d-flex align-items-end"><button class="btn btn-success w-100">Receive</button></div>
+            </EditForm>
+            @if (error != null) { <div class="text-danger mt-2">@error</div> }
+            @if (lastReceipt != null) { <div class="text-success mt-2">Payment ho gayi, student ko thank-you notification chala gaya. <a href="receipt/@lastReceipt" target="_blank">Receipt print karein</a></div> }
+        </div></div>
+
+        <div class="card mb-3 border-warning"><div class="card-header bg-warning-subtle">Settlement / Round-off (hisab close karein)</div><div class="card-body">
+            <div class="row g-2">
+                <div class="col-md-3"><label class="form-label small">Kya settle karein</label>
+                    <select class="form-select" @bind="sm.Scope" @bind:after="ScopeChanged"><option value="Overdue">Sirf abhi tak ki due</option><option value="All">Poora baaki (future months bhi)</option></select></div>
+                <div class="col-md-3"><label class="form-label small">Baaki (is scope me)</label><div class="form-control-plaintext fw-bold">₹@scopeBalance.ToString("N0")</div></div>
+                <div class="col-md-3"><label class="form-label small">Student ab kitna dega ₹</label><input type="number" class="form-control" @bind="sm.PayNow" @bind:event="oninput" /></div>
+                <div class="col-md-3"><label class="form-label small">Maaf (waive) hoga</label><div class="form-control-plaintext fw-bold text-danger">₹@Math.Max(0, scopeBalance - sm.PayNow).ToString("N0")</div></div>
+            </div>
+            <div class="mt-2 d-flex flex-wrap gap-1 align-items-center"><span class="small text-muted me-1">Round figure:</span>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => Round(10)">↓ 10</button>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => Round(100)">↓ 100</button>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => Round(500)">↓ 500</button>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => Round(1000)">↓ 1000</button>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => sm.PayNow = scopeBalance">Poora lo</button>
+                <button class="btn btn-sm btn-outline-danger" @onclick="() => sm.PayNow = 0">Poora maaf (₹0)</button></div>
+            <div class="row g-2 mt-1">
+                <div class="col-md-2"><label class="form-label small">Mode</label><select class="form-select" @bind="sm.Mode"><option>Cash</option><option>UPI</option><option>Card</option><option>Bank</option><option>Cheque</option></select></div>
+                <div class="col-md-3"><label class="form-label small">Reference / UTR</label><input class="form-control" @bind="sm.Reference" /></div>
+                <div class="col-md-4"><label class="form-label small">Remarks / karan</label><input class="form-control" @bind="sm.Remarks" placeholder="e.g. course chhod diya, final settlement" /></div>
+                <div class="col-md-3 d-flex align-items-end"><div class="form-check"><input class="form-check-input" type="checkbox" id="cl" @bind="sm.Close" /><label class="form-check-label" for="cl">Account close (Completed)</label></div></div>
+            </div>
+            <button class="btn btn-warning mt-2" @onclick="Settle" disabled="@(scopeBalance <= 0)">Settle karein</button>
+            @if (sError != null) { <span class="text-danger ms-2">@sError</span> }
+        </div></div>
+    }
+
+    <div class="row g-3">
+        <div class="col-lg-7"><div class="card"><div class="card-header">Fee schedule</div>
+            <table class="table table-sm mb-0"><thead><tr><th>Fee</th><th>Due date</th><th class="text-end">Amount</th><th class="text-end">Disc.</th><th class="text-end">Maaf</th><th class="text-end">Paid</th><th class="text-end">Balance</th></tr></thead>
+            @foreach (var i in fees)
+            {
+                <tr class="@(i.Balance > 0 && i.DueDate <= DateTime.Today ? "table-danger" : i.Balance == 0 ? "table-success" : "")">
+                    <td>@i.Title</td><td>@i.DueDate.ToString("dd-MM-yy")</td><td class="text-end">@i.Amount.ToString("N0")</td><td class="text-end">@i.Discount.ToString("N0")</td>
+                    <td class="text-end">@i.Waived.ToString("N0")</td><td class="text-end">@i.PaidAmount.ToString("N0")</td><td class="text-end">@i.Balance.ToString("N0")</td></tr>
+            }
+            </table></div></div>
+        <div class="col-lg-5"><div class="card"><div class="card-header">Payment history</div>
+            <table class="table table-sm mb-0"><thead><tr><th>Receipt</th><th>Date</th><th>Mode</th><th class="text-end">Amount</th><th></th></tr></thead>
+            @foreach (var p in pays)
+            {
+                <tr class="@(p.IsCancelled ? "text-decoration-line-through text-muted" : "")"><td><a href="receipt/@p.Id" target="_blank">@p.ReceiptNo</a></td><td>@p.PaidOn.ToString("dd-MM-yy")</td><td>@p.Mode</td>
+                    <td class="text-end">₹@p.Amount.ToString("N0")</td>
+                    <td>@if (!p.IsCancelled) { <button class="btn btn-sm btn-link text-danger p-0" @onclick="() => Cancel(p)">cancel</button> }</td></tr>
+            }
+            </table></div></div>
+    </div>
+
+    @if (settles.Count > 0)
+    {
+        <div class="card mt-3"><div class="card-header">Settlement history</div>
+            <table class="table table-sm mb-0"><thead><tr><th>Date</th><th>Scope</th><th class="text-end">Baaki tha</th><th class="text-end">Diya</th><th class="text-end">Maaf</th><th>Remarks</th><th>By</th><th></th></tr></thead>
+            @foreach (var x in settles)
+            {
+                <tr class="@(x.IsCancelled ? "text-decoration-line-through text-muted" : "")">
+                    <td>@x.SettledOn.ToString("dd-MM-yy hh:mm tt")</td><td>@(x.Scope == SettleScope.All ? "Poora baaki" : "Sirf due")@(x.ClosedAccount ? " • closed" : "")</td>
+                    <td class="text-end">₹@x.BalanceBefore.ToString("N0")</td><td class="text-end">₹@x.PaidAmount.ToString("N0")</td><td class="text-end text-danger">₹@x.WaivedAmount.ToString("N0")</td>
+                    <td>@x.Remarks</td><td>@x.SettledBy</td>
+                    <td>@if (!x.IsCancelled) { <button class="btn btn-sm btn-link text-danger p-0" @onclick="() => CancelSettle(x)">cancel</button> }</td></tr>
+            }
+            </table></div>
+    }
+}
+@code {
+    [Parameter] public int Id { get; set; }
+    Student? s; FeeSummary? sum; List<FeeInstallment> fees = new(); List<Payment> pays = new(); List<Settlement> settles = new();
+    PayModel pay = new(); SettleModel sm = new(); decimal scopeBalance; string? error, sError; int? lastReceipt;
+    class PayModel { public decimal Amount { get; set; } public string Mode { get; set; } = "Cash"; public string? Reference { get; set; } public string? Remarks { get; set; } }
+    class SettleModel { public string Scope { get; set; } = "Overdue"; public decimal PayNow { get; set; } public string Mode { get; set; } = "Cash"; public string? Reference { get; set; } public string? Remarks { get; set; } public bool Close { get; set; } }
+    SettleScope CurScope => sm.Scope == "All" ? SettleScope.All : SettleScope.Overdue;
+
+    protected override async Task OnInitializedAsync() => await Load();
+    async Task Load()
+    {
+        s = await Students.GetAsync(Id); if (s == null) return;
+        sum = await Fees.SummaryAsync(Id);
+        await using var db = await F.CreateDbContextAsync();
+        fees = (await db.FeeInstallments.Where(i => i.StudentId == Id).ToListAsync()).OrderBy(i => i.DueDate).ThenBy(i => i.MonthNo).ToList();
+        pays = await db.Payments.Where(p => p.StudentId == Id).OrderByDescending(p => p.PaidOn).ToListAsync();
+        settles = await Fees.SettlementsAsync(Id);
+        pay.Amount = sum.OverdueNow > 0 ? sum.OverdueNow : (fees.FirstOrDefault(i => i.Balance > 0)?.Balance ?? 0);
+        await ScopeChanged();
+    }
+    async Task ScopeChanged() { scopeBalance = await Fees.BalanceAsync(Id, CurScope); sm.PayNow = scopeBalance; }
+    void Round(int step) => sm.PayNow = Math.Floor(scopeBalance / step) * step;
+    async Task Approve() { await Students.ApproveAsync(Id); await Load(); }
+    async Task SetStatus(StudentStatus st) { await Students.SetStatusAsync(Id, st); await Load(); }
+    async Task<string> User() => (await Auth.GetAuthenticationStateAsync()).User.Identity?.Name ?? "Admin";
+    async Task Receive()
+    {
+        error = null; lastReceipt = null;
+        try
+        {
+            var p = await Fees.ReceiveAsync(Id, pay.Amount, pay.Mode, pay.Reference, pay.Remarks, await User());
+            lastReceipt = p.Id; pay = new(); await Load();
+        }
+        catch (InvalidOperationException e) { error = e.Message; }
+    }
+    async Task Cancel(Payment p)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Receipt {p.ReceiptNo} (₹{p.Amount:N0}) cancel karein?")) return;
+        await Fees.CancelPaymentAsync(p.Id); await Load();
+    }
+    async Task Settle()
+    {
+        sError = null;
+        var waive = scopeBalance - sm.PayNow;
+        if (!await JS.InvokeAsync<bool>("confirm", $"₹{sm.PayNow:N0} lekar ₹{waive:N0} maaf karke hisab settle karein? Student ko message/notification jayega.")) return;
+        try
+        {
+            await Fees.SettleAsync(Id, CurScope, sm.PayNow, sm.Mode, sm.Reference, sm.Remarks, sm.Close, await User());
+            sm = new(); await Load();
+        }
+        catch (InvalidOperationException e) { sError = e.Message; }
+    }
+    async Task CancelSettle(Settlement x)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Settlement cancel karein? ₹{x.WaivedAmount:N0} wapas due ho jayega.")) return;
+        await Fees.CancelSettlementAsync(x.Id); await Load();
+    }
+}

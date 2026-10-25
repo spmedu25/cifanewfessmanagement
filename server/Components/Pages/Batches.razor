@@ -1,0 +1,57 @@
+@page "/batches"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDb> F
+<PageTitle>Batches</PageTitle>
+<h3>Batches</h3>
+<div class="card mb-3"><div class="card-body">
+    <EditForm Model="edit" OnValidSubmit="Save" class="row g-2">
+        <DataAnnotationsValidator />
+        <div class="col-md-3"><label class="form-label small">Category</label>
+            <InputSelect class="form-select" @bind-Value="edit.CategoryId"><option value="0">-- select --</option>@foreach (var c in cats) { <option value="@c.Id">@c.Name</option> }</InputSelect></div>
+        <div class="col-md-3"><label class="form-label small">Batch name</label><InputText class="form-control" @bind-Value="edit.Name" placeholder="ADFA Morning 2026" /></div>
+        <div class="col-md-3"><label class="form-label small">Course (ID card pe)</label><InputText class="form-control" @bind-Value="edit.Course" placeholder="ADFA" /></div>
+        <div class="col-md-3"><label class="form-label small">Start date</label><InputDate class="form-control" @bind-Value="edit.StartDate" /></div>
+        <div class="col-md-2"><label class="form-label small">Duration (months)</label><InputNumber class="form-control" @bind-Value="edit.DurationMonths" /></div>
+        <div class="col-md-2"><label class="form-label small">Admission fee ₹</label><InputNumber class="form-control" @bind-Value="edit.AdmissionFee" /></div>
+        <div class="col-md-2"><label class="form-label small">Monthly fee ₹</label><InputNumber class="form-control" @bind-Value="edit.MonthlyFee" /></div>
+        <div class="col-md-2"><label class="form-label small">Capacity</label><InputNumber class="form-control" @bind-Value="edit.Capacity" /></div>
+        <div class="col-md-2 d-flex align-items-end"><div class="form-check"><InputCheckbox class="form-check-input" @bind-Value="edit.IsActive" /> <label class="form-check-label">Active</label></div></div>
+        <div class="col-md-2 d-flex align-items-end gap-1"><button class="btn btn-primary">@(edit.Id == 0 ? "Add" : "Update")</button>
+            @if (edit.Id != 0) { <button type="button" class="btn btn-light" @onclick="() => edit = New()">Cancel</button> }</div>
+        <ValidationSummary />
+    </EditForm>
+    @if (error != null) { <div class="text-danger">@error</div> }
+</div></div>
+<table class="table table-sm bg-white"><thead><tr><th>Category</th><th>Batch</th><th>Course</th><th>Months</th><th>Adm. fee</th><th>Monthly</th><th>Students</th><th></th></tr></thead>
+@foreach (var r in rows)
+{
+    <tr><td>@r.B.Category.Name</td><td>@r.B.Name @if (!r.B.IsActive) { <span class="badge bg-secondary">Inactive</span> }</td><td>@r.B.Course</td><td>@r.B.DurationMonths</td>
+        <td>₹@r.B.AdmissionFee.ToString("N0")</td><td>₹@r.B.MonthlyFee.ToString("N0")</td><td>@r.Count / @r.B.Capacity</td>
+        <td class="text-end"><button class="btn btn-sm btn-outline-primary" @onclick="() => Edit(r.B)">Edit</button>
+            <a class="btn btn-sm btn-outline-dark" href="idcard/batch/@r.B.Id" target="_blank" title="Poore batch ke ID cards print">ID Cards</a></td></tr>
+}
+</table>
+@code {
+    record Row(Batch B, int Count);
+    List<Category> cats = new(); List<Row> rows = new(); Batch edit = New(); string? error;
+    static Batch New() => new() { DurationMonths = 12, Capacity = 60, StartDate = DateTime.Today };
+    protected override async Task OnInitializedAsync() => await Load();
+    async Task Load()
+    {
+        await using var db = await F.CreateDbContextAsync();
+        cats = await db.Categories.OrderBy(c => c.Name).ToListAsync();
+        rows = await db.Batches.Include(b => b.Category).OrderBy(b => b.Category.Name).ThenBy(b => b.Name)
+            .Select(b => new Row(b, b.Students.Count(s => s.Status == StudentStatus.Active || s.Status == StudentStatus.Pending))).ToListAsync();
+    }
+    void Edit(Batch b) => edit = new Batch { Id = b.Id, CategoryId = b.CategoryId, Name = b.Name, Course = b.Course, DurationMonths = b.DurationMonths,
+        AdmissionFee = b.AdmissionFee, MonthlyFee = b.MonthlyFee, Capacity = b.Capacity, StartDate = b.StartDate, IsActive = b.IsActive };
+    async Task Save()
+    {
+        error = null;
+        if (edit.CategoryId == 0) { error = "Category select karein"; return; }
+        await using var db = await F.CreateDbContextAsync();
+        if (edit.Id == 0) db.Batches.Add(edit); else db.Batches.Update(edit);
+        await db.SaveChangesAsync(); edit = New(); await Load();
+    }
+}

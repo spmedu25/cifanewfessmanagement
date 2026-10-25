@@ -1,0 +1,29 @@
+﻿# .NET
+bin/
+obj/
+.vs/
+*.user
+publish/
+*.bak
+
+# Secrets / live config (kabhi commit na karein)
+server/appsettings.Production.json
+server/appsettings.Development.json
+firebase-key.json
+*firebase-adminsdk*.json
+*.jks
+*.keystore
+flutter_app/android/key.properties
+flutter_app/android/local.properties
+
+# Uploads (photos, chat images)
+server/wwwroot/uploads/*
+!server/wwwroot/uploads/.gitkeep
+
+# Flutter / IDE
+flutter_app/.dart_tool/
+flutter_app/build/
+.idea/
+*.iml
+
+server/appsettings.json

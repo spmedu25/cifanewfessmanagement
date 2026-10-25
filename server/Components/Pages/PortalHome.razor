@@ -1,0 +1,49 @@
+@page "/portal"
+@attribute [Authorize(Roles = "Student")]
+@layout PortalLayout
+@rendermode InteractiveServer
+@inject AuthenticationStateProvider Auth
+@inject StudentService StudentSvc
+@inject FeeService Fees
+<PageTitle>My Profile</PageTitle>
+@if (s == null) { <p>Loading...</p> }
+else
+{
+    @if (s.Status == StudentStatus.Pending) { <div class="alert alert-warning">Aapka admission admin approval ke intezaar me hai. Approve hone ke baad fees schedule aur ID card dikhega.</div> }
+    @if (sum != null && sum.OverdueNow > 0) { <div class="alert alert-danger">Aapki <b>₹@sum.OverdueNow.ToString("N0")</b> fees due hai (@sum.OverdueCount month). Kripya jaldi jama karein.</div> }
+    <div class="card mb-3"><div class="card-body d-flex gap-3 flex-wrap">
+        @if (s.PhotoPath != null) { <img src="@s.PhotoPath" style="width:100px;height:125px;object-fit:cover" class="rounded" /> }
+        <div>
+            <h4 class="mb-0">@s.Name</h4>
+            <div class="text-muted">Roll No. <b>@s.RollNo</b> • <span class="badge @(s.Status == StudentStatus.Active ? "bg-success" : s.Status == StudentStatus.Completed ? "bg-primary" : "bg-secondary")">@s.Status</span></div>
+            <div class="mt-2">@s.Batch.Category.Name › @s.Batch.Name</div>
+            <div>Course: <b>@s.Batch.Course</b> • @s.Batch.DurationMonths months</div>
+        </div>
+    </div></div>
+    <div class="row g-2 mb-3">
+        <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Total fees</div><div class="fs-5">₹@(sum?.TotalNet.ToString("N0"))</div></div></div></div>
+        <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Paid</div><div class="fs-5 text-success">₹@(sum?.Paid.ToString("N0"))</div></div></div></div>
+        <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Remaining</div><div class="fs-5">₹@(sum?.Balance.ToString("N0"))</div></div></div></div>
+        <div class="col-6 col-md-3"><div class="card border-danger"><div class="card-body py-2"><div class="small text-muted">Due abhi tak</div><div class="fs-5 text-danger">₹@(sum?.OverdueNow.ToString("N0"))</div></div></div></div>
+    </div>
+    <div class="card"><div class="card-header">Meri details</div>
+        <table class="table table-sm mb-0">
+            <tr><th style="width:180px">Father's name</th><td>@s.FatherName</td></tr>
+            @if (!string.IsNullOrEmpty(s.MotherName)) { <tr><th>Mother's name</th><td>@s.MotherName</td></tr> }
+            <tr><th>Mobile</th><td>@s.Mobile @(string.IsNullOrEmpty(s.AltMobile) ? "" : " / " + s.AltMobile)</td></tr>
+            @if (!string.IsNullOrEmpty(s.Email)) { <tr><th>Email</th><td>@s.Email</td></tr> }
+            <tr><th>Address</th><td>@s.Address</td></tr>
+            @if (s.DateOfBirth != null) { <tr><th>Date of birth</th><td>@s.DateOfBirth.Value.ToString("dd-MM-yyyy")</td></tr> }
+            <tr><th>Admission date</th><td>@s.AdmissionDate.ToString("dd-MM-yyyy")</td></tr>
+            <tr><th>Monthly discount</th><td>₹@s.MonthlyDiscount.ToString("N0")</td></tr>
+        </table></div>
+}
+@code {
+    Student? s; FeeSummary? sum;
+    protected override async Task OnInitializedAsync()
+    {
+        var id = await Auth.StudentIdAsync();
+        s = await StudentSvc.GetAsync(id);
+        if (s != null) sum = await Fees.SummaryAsync(id);
+    }
+}

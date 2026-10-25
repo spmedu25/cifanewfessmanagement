@@ -1,0 +1,49 @@
+@page "/portal/fees"
+@attribute [Authorize(Roles = "Student")]
+@layout PortalLayout
+@rendermode InteractiveServer
+@inject AuthenticationStateProvider Auth
+@inject IDbContextFactory<AppDb> F
+@inject FeeService Fees
+<PageTitle>My Fees</PageTitle>
+<h4>Fees schedule</h4>
+<div class="table-responsive"><table class="table table-sm bg-white">
+    <thead><tr><th>Fee</th><th>Due date</th><th class="text-end">Amount</th><th class="text-end">Discount</th><th class="text-end">Maaf</th><th class="text-end">Paid</th><th class="text-end">Balance</th></tr></thead>
+    @foreach (var i in fees)
+    {
+        <tr class="@(i.Balance == 0 ? "table-success" : i.DueDate <= DateTime.Today ? "table-danger" : "")">
+            <td>@i.Title</td><td>@i.DueDate.ToString("dd-MM-yy")</td><td class="text-end">@i.Amount.ToString("N0")</td><td class="text-end">@i.Discount.ToString("N0")</td>
+            <td class="text-end">@i.Waived.ToString("N0")</td><td class="text-end">@i.PaidAmount.ToString("N0")</td><td class="text-end">@(i.Balance == 0 ? "PAID" : i.Balance.ToString("N0"))</td></tr>
+    }
+</table></div>
+<h4 class="mt-4">Payment history</h4>
+<div class="table-responsive"><table class="table table-sm bg-white">
+    <thead><tr><th>Receipt</th><th>Date</th><th>Mode</th><th class="text-end">Amount</th></tr></thead>
+    @foreach (var p in pays)
+    {
+        <tr class="@(p.IsCancelled ? "text-decoration-line-through text-muted" : "")"><td><a href="receipt/@p.Id" target="_blank">@p.ReceiptNo</a></td><td>@p.PaidOn.ToString("dd-MM-yy hh:mm tt")</td><td>@p.Mode</td><td class="text-end">₹@p.Amount.ToString("N0")</td></tr>
+    }
+    @if (pays.Count == 0) { <tr><td colspan="4" class="text-muted">Abhi koi payment nahi</td></tr> }
+</table></div>
+@if (sets.Any(x => !x.IsCancelled))
+{
+    <h4 class="mt-4">Settlement history</h4>
+    <div class="table-responsive"><table class="table table-sm bg-white">
+        <thead><tr><th>Date</th><th class="text-end">Baaki tha</th><th class="text-end">Aapne diya</th><th class="text-end">Maaf</th><th>Note</th></tr></thead>
+        @foreach (var x in sets.Where(x => !x.IsCancelled))
+        {
+            <tr><td>@x.SettledOn.ToString("dd-MM-yy")</td><td class="text-end">₹@x.BalanceBefore.ToString("N0")</td><td class="text-end">₹@x.PaidAmount.ToString("N0")</td><td class="text-end text-success">₹@x.WaivedAmount.ToString("N0")</td><td>@x.Remarks</td></tr>
+        }
+    </table></div>
+}
+@code {
+    List<FeeInstallment> fees = new(); List<Payment> pays = new(); List<Settlement> sets = new();
+    protected override async Task OnInitializedAsync()
+    {
+        var id = await Auth.StudentIdAsync();
+        await using var db = await F.CreateDbContextAsync();
+        fees = (await db.FeeInstallments.Where(i => i.StudentId == id).ToListAsync()).OrderBy(i => i.DueDate).ThenBy(i => i.MonthNo).ToList();
+        pays = await db.Payments.Where(p => p.StudentId == id).OrderByDescending(p => p.PaidOn).ToListAsync();
+        sets = await Fees.SettlementsAsync(id);
+    }
+}

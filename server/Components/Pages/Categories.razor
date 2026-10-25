@@ -1,0 +1,35 @@
+@page "/categories"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDb> F
+<PageTitle>Categories</PageTitle>
+<h3>Categories</h3>
+<div class="card mb-3"><div class="card-body">
+    <EditForm Model="edit" OnValidSubmit="Save" class="row g-2">
+        <DataAnnotationsValidator />
+        <div class="col-md-4"><InputText class="form-control" @bind-Value="edit.Name" placeholder="Category name (e.g. Computer Courses)" /></div>
+        <div class="col-md-5"><InputText class="form-control" @bind-Value="edit.Description" placeholder="Description" /></div>
+        <div class="col-md-3"><button class="btn btn-primary">@(edit.Id == 0 ? "Add" : "Update")</button>
+            @if (edit.Id != 0) { <button type="button" class="btn btn-light" @onclick="() => edit = new()">Cancel</button> }</div>
+        <ValidationSummary />
+    </EditForm></div></div>
+<table class="table table-sm bg-white"><thead><tr><th>Name</th><th>Description</th><th>Status</th><th></th></tr></thead>
+@foreach (var c in items)
+{
+    <tr><td>@c.Name</td><td>@c.Description</td><td><span class="badge @(c.IsActive ? "bg-success" : "bg-secondary")">@(c.IsActive ? "Active" : "Inactive")</span></td>
+        <td class="text-end"><button class="btn btn-sm btn-outline-primary" @onclick="() => edit = new Category { Id = c.Id, Name = c.Name, Description = c.Description, IsActive = c.IsActive }">Edit</button>
+            <button class="btn btn-sm btn-outline-secondary" @onclick="() => Toggle(c)">@(c.IsActive ? "Disable" : "Enable")</button></td></tr>
+}
+</table>
+@code {
+    List<Category> items = new(); Category edit = new();
+    protected override async Task OnInitializedAsync() => await Load();
+    async Task Load() { await using var db = await F.CreateDbContextAsync(); items = await db.Categories.OrderBy(c => c.Name).ToListAsync(); }
+    async Task Save()
+    {
+        await using var db = await F.CreateDbContextAsync();
+        if (edit.Id == 0) db.Categories.Add(edit); else db.Categories.Update(edit);
+        await db.SaveChangesAsync(); edit = new(); await Load();
+    }
+    async Task Toggle(Category c) { await using var db = await F.CreateDbContextAsync(); var x = await db.Categories.FindAsync(c.Id); x!.IsActive = !x.IsActive; await db.SaveChangesAsync(); await Load(); }
+}

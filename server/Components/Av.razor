@@ -1,0 +1,5 @@
+@if (Photo != null) { <img class="avatar" src="@Photo" /> } else { <div class="avatar">@(string.IsNullOrEmpty(Name) ? "?" : Name[..1].ToUpper())</div> }
+@code {
+    [Parameter] public string? Name { get; set; }
+    [Parameter] public string? Photo { get; set; }
+}

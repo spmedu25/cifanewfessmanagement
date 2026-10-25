@@ -1,0 +1,32 @@
+@page "/settlements"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject FeeService Fees
+@inject IJSRuntime JS
+<PageTitle>Settlements</PageTitle>
+<h3>Settlements (hisab close / round-off) history</h3>
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Total settlements</div><div class="fs-5">@rows.Count(r => !r.IsCancelled)</div></div></div></div>
+    <div class="col-6 col-md-3"><div class="card"><div class="card-body py-2"><div class="small text-muted">Student se mila</div><div class="fs-5 text-success">₹@rows.Where(r => !r.IsCancelled).Sum(r => r.PaidAmount).ToString("N0")</div></div></div></div>
+    <div class="col-6 col-md-3"><div class="card border-warning"><div class="card-body py-2"><div class="small text-muted">Total maaf kiya</div><div class="fs-5 text-danger">₹@rows.Where(r => !r.IsCancelled).Sum(r => r.WaivedAmount).ToString("N0")</div></div></div></div>
+</div>
+<table class="table table-sm table-hover bg-white"><thead><tr><th>Date</th><th>Student</th><th>Scope</th><th class="text-end">Baaki tha</th><th class="text-end">Diya</th><th class="text-end">Maaf</th><th>Remarks</th><th>By</th><th></th></tr></thead>
+@foreach (var r in rows)
+{
+    <tr class="@(r.IsCancelled ? "text-decoration-line-through text-muted" : "")">
+        <td>@r.SettledOn.ToString("dd-MM-yy hh:mm tt")</td><td><a href="students/@r.StudentId">@r.Student.Name (@r.Student.RollNo)</a></td>
+        <td>@(r.Scope == SettleScope.All ? "Poora baaki" : "Sirf due")@(r.ClosedAccount ? " • closed" : "")</td>
+        <td class="text-end">₹@r.BalanceBefore.ToString("N0")</td><td class="text-end">₹@r.PaidAmount.ToString("N0")</td><td class="text-end text-danger">₹@r.WaivedAmount.ToString("N0")</td>
+        <td>@r.Remarks</td><td>@r.SettledBy</td>
+        <td>@if (!r.IsCancelled) { <button class="btn btn-sm btn-link text-danger p-0" @onclick="() => Cancel(r)">cancel</button> }</td></tr>
+}
+</table>
+@code {
+    List<Settlement> rows = new();
+    protected override async Task OnInitializedAsync() => rows = await Fees.SettlementsAsync(null);
+    async Task Cancel(Settlement r)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"{r.Student.Name} ka settlement cancel karein? Maaf amount wapas due ho jayegi.")) return;
+        await Fees.CancelSettlementAsync(r.Id); rows = await Fees.SettlementsAsync(null);
+    }
+}

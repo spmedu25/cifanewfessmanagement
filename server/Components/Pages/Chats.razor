@@ -1,0 +1,143 @@
+@page "/chats"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@implements IDisposable
+@inject ChatService Chat
+@inject ChatNotifier Notifier
+@inject StudentService Students
+@inject IDbContextFactory<AppDb> F
+@inject FileStore Files
+@inject IJSRuntime JS
+<PageTitle>Messages</PageTitle>
+<div class="row g-0 chat-wrap">
+    <div class="col-md-4 chat-list">
+        <div class="p-2 border-bottom bg-light">
+            <input class="form-control mb-2" placeholder="Search / naya chat (name, roll, mobile)" @bind="search" @bind:event="oninput" @bind:after="DoSearch" />
+            <div class="d-flex gap-1">
+                <button class="btn btn-sm btn-outline-primary flex-fill" @onclick="() => panel = panel == 1 ? 0 : 1"><i class="bi bi-megaphone"></i> Broadcast</button>
+                <button class="btn btn-sm btn-outline-danger flex-fill" @onclick="() => panel = panel == 2 ? 0 : 2"><i class="bi bi-bell"></i> Due reminder</button>
+            </div>
+            @if (panel > 0)
+            {
+                <div class="mt-2">
+                    <select class="form-select form-select-sm mb-1" @bind="batchId"><option value="0">Sabhi active students</option>@foreach (var b in batches) { <option value="@b.Id">@b.Name</option> }</select>
+                    @if (panel == 1) { <textarea class="form-control form-control-sm mb-1" rows="3" placeholder="Announcement likhein..." @bind="bcText"></textarea> }
+                    <button class="btn btn-sm btn-success w-100" @onclick="SendPanel">@(panel == 1 ? "Sabko bhejein" : "Due wale sabko reminder bhejein")</button>
+                </div>
+            }
+            @if (panelMsg != null) { <div class="small text-success mt-1">@panelMsg</div> }
+        </div>
+        @if (found.Count > 0)
+        {
+            <div class="small text-muted px-3 pt-2">Naya chat shuru karein</div>
+            @foreach (var s in found) { <div class="chat-item" @onclick="() => Select(s.Id)"><Av Name="@s.Name" Photo="@s.PhotoPath" /><div><b>@s.Name</b><div class="small text-muted">Roll @s.RollNo • @s.Batch.Name</div></div></div> }
+            <hr class="my-0" />
+        }
+        @foreach (var c in convos.Where(c => string.IsNullOrWhiteSpace(search) || c.Name.Contains(search, StringComparison.OrdinalIgnoreCase)))
+        {
+            <div class="chat-item @(c.StudentId == selected ? "sel" : "")" @onclick="() => Select(c.StudentId)">
+                <Av Name="@c.Name" Photo="@c.Photo" />
+                <div class="flex-grow-1" style="min-width:0">
+                    <div class="d-flex justify-content-between"><b class="text-truncate">@c.Name</b><span class="small text-muted">@Short(c.LastAt)</span></div>
+                    <div class="d-flex justify-content-between"><span class="small text-muted text-truncate">@(c.LastFromAdmin ? "You: " : "")@c.LastText</span>
+                        @if (c.Unread > 0) { <span class="nav-badge">@c.Unread</span> }</div>
+                </div>
+            </div>
+        }
+        @if (convos.Count == 0 && found.Count == 0) { <p class="p-3 text-muted">Abhi koi chat nahi. Upar search karke shuru karein.</p> }
+    </div>
+    <div class="col-md-8 chat-pane">
+        @if (thread?.Student == null) { <div class="m-auto text-muted"><i class="bi bi-chat-dots fs-1"></i><div>Chat chunein</div></div> }
+        else
+        {
+            var st = thread.Student;
+            <div class="chat-head"><Av Name="@st.Name" Photo="@st.PhotoPath" />
+                <div class="flex-grow-1"><a href="students/@st.Id" class="fw-bold text-dark text-decoration-none">@st.Name</a><div class="small text-muted">Roll @st.RollNo • @st.Mobile</div></div>
+                <a class="btn btn-sm btn-outline-success" target="_blank" href="https://wa.me/91@st.Mobile">WhatsApp</a></div>
+            <div class="chat-msgs" id="chatbox">
+                @{ DateTime? day = null; }
+                @foreach (var m in thread.Messages)
+                {
+                    if (day != m.SentAt.Date) { day = m.SentAt.Date; <div class="dsep"><span>@(day == DateTime.Today ? "Today" : day.Value.ToString("dd MMM yyyy"))</span></div> }
+                    <div class="bub @(m.FromAdmin ? "me" : "other")">
+                        @if (m.AttachmentPath != null) { <a href="@m.AttachmentPath" target="_blank"><img src="@m.AttachmentPath" /></a> }
+                        @m.Text
+                        <div class="tm">@m.SentAt.ToString("hh:mm tt") @if (m.FromAdmin) { <span class="tick @(m.Id <= thread.OtherReadUpTo ? "read" : "")">✓✓</span> }</div>
+                    </div>
+                }
+            </div>
+            <div class="chat-input">
+                <label class="btn btn-light mb-0" title="Photo bhejein"><i class="bi bi-image"></i><InputFile class="d-none" accept="image/*" OnChange="SendImage" /></label>
+                <input class="form-control" placeholder="Message likhein..." @bind="text" @bind:event="oninput" @onkeydown="OnKey" />
+                <button class="btn btn-success" @onclick="Send" disabled="@(string.IsNullOrWhiteSpace(text))"><i class="bi bi-send-fill"></i></button>
+            </div>
+            @if (error != null) { <div class="text-danger small px-3 pb-1">@error</div> }
+        }
+    </div>
+</div>
+@code {
+    [SupplyParameterFromQuery(Name = "student")] public int? StudentParam { get; set; }
+    List<ConversationRow> convos = new(); List<Student> found = new(); List<Batch> batches = new();
+    ChatThread? thread; int? selected; string? text, search, error, bcText, panelMsg; int panel, batchId; bool scroll, subscribed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await F.CreateDbContextAsync();
+        batches = await db.Batches.OrderBy(b => b.Name).ToListAsync();
+        convos = await Chat.ConversationsAsync();
+        if (StudentParam != null) await Select(StudentParam.Value);
+    }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) { subscribed = true; Notifier.Changed += OnChat; }
+        if (scroll) { scroll = false; await JS.InvokeVoidAsync("chatScroll", "chatbox"); }
+    }
+    void OnChat(ChatEvent e) => _ = InvokeAsync(async () =>
+    {
+        convos = await Chat.ConversationsAsync();
+        if (selected != null && (e.StudentId == selected || e.StudentId == 0)) { thread = await Chat.ThreadAsync(selected.Value, 0, true); scroll = true; }
+        StateHasChanged();
+    });
+    public void Dispose() { if (subscribed) Notifier.Changed -= OnChat; }
+
+    static string Short(DateTime d) => d.Date == DateTime.Today ? d.ToString("hh:mm tt") : d.ToString("dd/MM");
+    async Task DoSearch()
+    {
+        if ((search ?? "").Trim().Length < 2) { found.Clear(); return; }
+        var (rows, _) = await Students.SearchAsync(search, null, null, StudentStatus.Active, 1, 6);
+        found = rows.Select(r => r.S).Where(s => convos.All(c => c.StudentId != s.Id)).ToList();
+    }
+    async Task Select(int id)
+    {
+        selected = id; found.Clear(); search = null; error = null;
+        thread = await Chat.ThreadAsync(id, 0, true); scroll = true;
+        convos = await Chat.ConversationsAsync();
+    }
+    async Task OnKey(KeyboardEventArgs e) { if (e.Key == "Enter") await Send(); }
+    async Task Send()
+    {
+        if (selected == null || string.IsNullOrWhiteSpace(text)) return;
+        error = null;
+        try { await Chat.SendAsync(selected.Value, true, text, null); text = null; }
+        catch (InvalidOperationException e) { error = e.Message; }
+    }
+    async Task SendImage(InputFileChangeEventArgs e)
+    {
+        if (selected == null) return;
+        try
+        {
+            await using var s = e.File.OpenReadStream(5_000_000);
+            await Chat.SendAsync(selected.Value, true, null, await Files.SaveAsync(s, e.File.Name, "chat"));
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException) { error = ex.Message; }
+    }
+    async Task SendPanel()
+    {
+        try
+        {
+            var n = panel == 1 ? await Chat.BroadcastAsync(null, batchId, bcText) : await Chat.RemindDuesAsync(null, batchId);
+            panelMsg = $"{n} students ko bhej diya ✔"; if (panel == 1) bcText = null; panel = 0;
+        }
+        catch (InvalidOperationException e) { panelMsg = e.Message; }
+    }
+}
